@@ -1,182 +1,122 @@
-#------------------------------------------#
-#----Student Database Management System----#
-#----created by Anuran Barman--------------#
-#----modules: PyQt and Sqlite3-------------#
-#----www.mranuran.com----------------------#
-#----anuranbarman@gmail.com----------------#
-#------------------------------------------#
+import sqlite3
+import sys
+import time
 
-import sys,sqlite3,time
 from PyQt5 import QtGui
-from PyQt5.QtWidgets import QTableWidgetItem,QTableWidget,QComboBox,QVBoxLayout,QGridLayout,QDialog,QWidget, QPushButton, QApplication, QMainWindow,QAction,QMessageBox,QLabel,QTextEdit,QProgressBar,QLineEdit
-from PyQt5.QtCore import QCoreApplication
+from PyQt5.QtCore import QDate, Qt
+from PyQt5.QtWidgets import QTableWidgetItem, QTableWidget, QComboBox, QVBoxLayout, QGridLayout, QDialog, QFileDialog, \
+    QPushButton, QApplication, QMainWindow, QMessageBox, QLabel, QLineEdit, QDateEdit
 
 
-#DBHelper class holding all important functions for the application.
-#addStudent() add a student given roll,name,gender,branch,year,academic_year,address,mobile
-#searchStudent() searches for a student associating to the given roll number
-#addPayment() adds the payment to the database
-#searchPayment() searches for the payment  made by the student with the given roll number
-
-#DB has 4 tables among which only two has rows and columns in it currenrly. as you expand the application and
-#make it more complex you can use other tables as you like.
-#the most important table which is used here is students and payments.
-
-#students holds the records of the students and payments hold the records of the payments
-
-#students(roll INTEGER,name TEXT,gender INTEGER,branch INTEGER,year INTEGER,academic_year INTEGER,address TEXT,mobile INTEGER)
-#here geneder is either 0 for Male or 1 for Female
-#branch has 6 values ranging from 0 to 5
-#0->Mechanical,1->Civil,2->Electrical,3->ECE,4->CSE,5->IT
-#academic year is when the student joined the college.
-#other columns are self explanatory.
-
-class DBHelper():
+class DBHelper:
     def __init__(self):
-        self.conn=sqlite3.connect("sdms.db")
-        self.c=self.conn.cursor()
-        self.c.execute("CREATE TABLE IF NOT EXISTS students(roll INTEGER,name TEXT,gender INTEGER,branch INTEGER,year INTEGER,academic_year INTEGER,address TEXT,mobile INTEGER)")
-        self.c.execute("CREATE TABLE IF NOT EXISTS payments(reciept_no INTEGER,roll INTEGER,fee INTEGER,semester INTEGER,reciept_date TEXT)")
-        self.c.execute("CREATE TABLE IF NOT EXISTS genders(id INTEGER,name TEXT)")
-        self.c.execute("CREATE TABLE IF NOT EXISTS branches(id INTEGER,name TEXT)")
-    def addStudent(self,roll,name,gender,branch,year,academic_year,address,mobile):
+        self.conn = sqlite3.connect("sdms.db")
+        self.c = self.conn.cursor()
+        self.c.execute("CREATE TABLE IF NOT EXISTS students(reg INTEGER, roll INTEGER, name TEXT, mother TEXT, "
+                       "father TEXT, gender INTEGER, dob TEXT, branch INTEGER, address TEXT, mobile INTEGER, "
+                       "image TEXT, document TEXT, marks TEXT)")
+        self.c.execute("CREATE TABLE IF NOT EXISTS payments(receipt_no INTEGER, reg INTEGER, fee INTEGER, receipt_date TEXT)")
+
+    def addStudent(self, name, mother, father, gender, branch, dob, marks_set, address, mobile, image, document):
         try:
-            self.c.execute("INSERT INTO students (roll,name,gender,branch,year,academic_year,address,mobile) VALUES (?,?,?,?,?,?,?,?)",(roll,name,gender,branch,year,academic_year,address,mobile))
+            try:
+                self.c.execute("SELECT reg from students WHERE reg = (SELECT MAX(reg) FROM students)")
+                reg = self.c.fetchone()[0] + 1
+            except:
+                reg = 1
+
+            marks = str(marks_set).strip('[]').replace(' ', '')
+            self.c.execute("INSERT INTO students (reg, roll, name, mother, father, gender, dob, branch, address, mobile, image, "
+                           "document, marks) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                           (reg, '-1', name, mother, father, gender, dob, branch, address, mobile, image, document, marks))
             self.conn.commit()
             self.c.close()
             self.conn.close()
-            QMessageBox.information(QMessageBox(),'Successful','Student is added successfully to the database.')
+            QMessageBox.information(QMessageBox(), 'Successful', 'Student is successfully registered!\n'
+                                                                 'The Registration No is ' + str(reg))
         except Exception:
-            QMessageBox.warning(QMessageBox(), 'Error', 'Could not add student to the database.')
+            QMessageBox.warning(QMessageBox(), 'Error', 'Could not register student!')
 
-    def searchStudent(self,roll):
-        #we make a DB query to search for a student holding the roll number. if we find any then we pass the result returned
-        #from the DB to our custom function showStudent() which then analyze the list.
-        self.c.execute("SELECT * from students WHERE roll="+str(roll))
-        self.data=self.c.fetchone()
+    def searchStudent(self, reg):
+        self.c.execute("SELECT reg FROM students")
+        total = self.c.rowcount
+        self.c.execute("SELECT * FROM students WHERE reg = " + str(reg))
+        data = self.c.fetchone()
 
-        #if there is no data returned by above cursor function fetchone() then it means there is no record
-        #holding the roll number. so we show a warning box saying the same and return from the function.
-        if not self.data:
-            QMessageBox.warning(QMessageBox(), 'Error', 'Could not find any student with roll no '+str(roll))
+        if not data:
+            QMessageBox.warning(QMessageBox(), 'Error', 'Could not find any student with Registration no ' + str(reg))
             return None
-        self.list=[]
-        for i in range(0,8):
-            self.list.append(self.data[i])
+        list = []
+        for i in range(0, 11):
+            list.append(data[i])
         self.c.close()
         self.conn.close()
-        #it's out custom function which analyzes the list and show the output in tabular form to the application user.
-        showStudent(self.list)
 
+        showStudent(list, total)
 
-    #this function is the most important and complex part of the whole program. This adds the payment made by the student to the
-    #database. roll and fee are integers and semester it either 0 for Odd semester or 1 for Even semester.
-    #there are some posibilites here. They are-----
-    #1.)admin tries to add a fresh entry but he has put semester as Even when the student has not paid the Odd semester fee
-    #2.)admin tries to add entry for a student who has already paid his/her both semester fees
-    #3.)admin tries to add entry for astudent for the same semester twice
-
-    def addPayment(self,roll,fee,semester):
-        reciept_no=int(time.time())
-        date=time.strftime("%b %d %Y %H:%M:%S")
+    def addPayment(self, reg, fee):
+        receipt_no = int(time.time())
+        date = time.strftime("%b %d %Y %H:%M:%S")
         try:
-            #we check to see if any payment record exists in the database with the roll number
-            self.c.execute("SELECT * from payments WHERE roll=" + str(roll))
+            self.c.execute("SELECT * from students WHERE reg = " + str(reg))
             self.conn.commit()
 
-            #if it does not exists then following possibilities may occur.
             if not self.c.fetchone():
-                #admin tries to add fee for Even semester but student has not paid the Odd semester.
-                if semester == 1:
-                    #query to check if there is any record with same roll number and semester as 0 which is Odd Semester
-                    self.c.execute("SELECT * from payments WHERE roll=" + str(roll) + " AND semester=0")
+                QMessageBox.warning(QMessageBox(), 'Error', 'No entries found for Registration No ' + str(reg))
+                return None
 
-                    #above query fails. that means student has not paid the Odd semester fee. So we show
-                    #a dialog saying the same.
-                    if not self.c.fetchone():
-                        QMessageBox.warning(QMessageBox(), 'Error',
-                                            'Student with roll no ' + str(
-                                                roll) + ' has Odd Semester fee payment due.Pay that first.')
-                        return None
-                else:
-                    #admin is making entry for Odd semester first. That's okay. Go ahead.
-                    self.c.execute("INSERT INTO payments (reciept_no,roll,fee,semester,reciept_date) VALUES (?,?,?,?,?)",(reciept_no, roll, fee, semester, date))
-                    self.conn.commit()
-                QMessageBox.information(QMessageBox(), 'Successful','Payment is added successfully to the database.\nReference ID=' + str(reciept_no))
+            try:
+                self.c.execute("SELECT MAX(roll) FROM students")
+                roll = self.c.fetchone()[0] + 1
+                if roll == 0:
+                    roll = 1
+                self.conn.commit()
+            except:
+                roll = 1
+
+            self.c.execute("SELECT * from payments WHERE reg = " + str(reg))
+            self.conn.commit()
+
+            if not self.c.fetchone():
+                self.c.execute(
+                    "INSERT INTO payments (receipt_no, reg, fee, receipt_date) VALUES (?, ?, ?, ?)",
+                    (receipt_no, reg, fee, date))
+                self.c.execute(
+                    "UPDATE students SET roll = ? WHERE reg = ?", (reg, roll))
+                self.conn.commit()
+                QMessageBox.information(QMessageBox(), 'Successful', 'Payment is added successfully to the database.\n'
+                                                                     'Reference ID = ' + str(receipt_no) +
+                                        '\n Assigned Roll No is ' + str(roll))
             else:
-
-                #as there is too much query execution for the same cursor object sometimes it acts weird. So to be
-                #in the safe side we execute the same query again which is searching payments table
-                #for records holding the given roll number.
-                self.c.execute("SELECT * from payments WHERE roll=" + str(roll))
-
-                #we fetch all records.
-                self.data = self.c.fetchall()
-
-                #if student has more than one records in the database that means he/she has paid both semester fees.
-                if len(self.data) == 2:
-                    QMessageBox.warning(QMessageBox(), 'Error','Student with roll no ' + str(roll) + ' has already paid both semester fees.')
-                #admin is trying to make Even semester payment. We check if there is any record for Odd semester.
-                #if it fails then it means it has to make the payment for the Odd semester first.
-                #otherwise make the payment.
-                elif semester==1:
-                    self.c.execute("SELECT * from payments WHERE roll=" + str(roll)+" AND semester=0")
-                    if not self.c.fetchone():
-                        QMessageBox.warning(QMessageBox(), 'Error','Student with roll no ' + str(roll) + ' has Odd Semester fee payment due.Pay that first.')
-                    else:
-                        self.c.execute(
-                            "INSERT INTO payments (reciept_no,roll,fee,semester,reciept_date) VALUES (?,?,?,?,?)",
-                            (reciept_no, roll, fee, semester, date))
-                        self.conn.commit()
-                        QMessageBox.information(QMessageBox(), 'Successful',
-                                                'Payment is added successfully to the database.\nReference ID=' + str(
-
-                                                    reciept_no))
-                #here we try to check if admin is trying to make payment for the same semester twice.
-                elif self.data[0][3] == semester:
-                    QMessageBox.warning(QMessageBox(), 'Error','Student with roll no ' + str(roll) + ' has already paid this semester fees.')
-                #everything is fine. Go ahead and make the payment.
-                else:
-                    self.c.execute(
-                        "INSERT INTO payments (reciept_no,roll,fee,semester,reciept_date) VALUES (?,?,?,?,?)",
-                        (reciept_no, roll, fee, semester, date))
-                    self.conn.commit()
-                    QMessageBox.information(QMessageBox(), 'Successful',
-                                            'Payment is added successfully to the database.\nReference ID=' + str(
-                                                reciept_no))
-
+                QMessageBox.warning(QMessageBox(), 'Error', 'Student with Reg No ' + str(reg) +
+                                    ' has already paid for admisssion!')
         except Exception:
             QMessageBox.warning(QMessageBox(), 'Error', 'Could not add payment to the database.')
 
         self.c.close()
         self.conn.close()
 
-        #similar to the searchStudent() it will search for any record holding the roll number in the database.
-        #it will then pass the returned list from the DB to the function searchStudentFunction()
-        #here in the query we use ORDER BY reciept_no DESC so that rows with semester value as 1 comes first
-        #if it exists. Then we can be sure that student has paid his/her both semester fees as we overcame
-        #the possibility of adding Odd semester fee first. if there are any record for two semester
-        #so they will come as semester=1 first then semester=0.
-    def searchPayment(self,roll):
-        self.c.execute("SELECT * from payments WHERE roll="+str(roll)+" ORDER BY reciept_no DESC")
-        self.data=self.c.fetchone()
-        if not self.data:
-            QMessageBox.warning(QMessageBox(), 'Error', 'Could not find any student with roll no '+str(roll))
+    def searchPayment(self, reg):
+        self.c.execute("SELECT * from payments WHERE reg = " + str(reg) + " ORDER BY receipt_no DESC")
+        data = self.c.fetchone()
+        if not data:
+            QMessageBox.warning(QMessageBox(), 'Error', 'Could not find any payment recorded for Registration No ' +
+                                str(reg))
             return None
-        self.list=self.data
-        # for j in range(6):
-        #     self.list.append(self.data[j])
+        list = []
+        for i in range(0, 4):
+            list.append(data[i])
         self.c.close()
         self.conn.close()
-        showPaymentFunction(self.list)
+        showPaymentFunction(list)
 
-#this is a login function which shows a dialog for admin to log into the system.
-# Default username and password are admin and admin respectively.
+
 class Login(QDialog):
+
     def __init__(self, parent=None):
         super(Login, self).__init__(parent)
-        self.userNameLabel=QLabel("Username")
-        self.userPassLabel=QLabel("Password")
+        self.userNameLabel = QLabel("Username")
+        self.userPassLabel = QLabel("Password")
         self.textName = QLineEdit(self)
         self.textPass = QLineEdit(self)
         self.buttonLogin = QPushButton('Login', self)
@@ -184,188 +124,126 @@ class Login(QDialog):
         layout = QGridLayout(self)
         layout.addWidget(self.userNameLabel, 1, 1)
         layout.addWidget(self.userPassLabel, 2, 1)
-        layout.addWidget(self.textName,1,2)
-        layout.addWidget(self.textPass,2,2)
-        layout.addWidget(self.buttonLogin,3,1,1,2)
+        layout.addWidget(self.textName, 1, 2)
+        layout.addWidget(self.textPass, 2, 2)
+        layout.addWidget(self.buttonLogin, 3, 1, 1, 2)
 
         self.setWindowTitle("Login")
 
-
     def handleLogin(self):
         if (self.textName.text() == 'admin' and
-            self.textPass.text() == 'admin'):
+                self.textPass.text() == 'admin'):
             self.accept()
         else:
             QMessageBox.warning(
                 self, 'Error', 'Bad user or password')
 
-#function to show the dialog with records of the student returned for the DB holding the roll number.
-def showStudent(list):
-        roll=0
-        gender = ""
-        branch = ""
-        year = ""
-        name = ""
-        address = ""
-        mobile = -1
-        academic_year = -1
 
-        roll=list[0]
-        name=list[1]
+def showStudent(list, total):
+    if list[1] == -1:
+        list[1] = '(Payment Not Received)'
 
-        if list[2]==0:
-            gender="Male"
-        else:
-            gender="Female"
+    if list[5] == 0:
+        list[5] = "Male"
+    else:
+        list[5] = "Female"
 
-        if list[3]==0:
-            branch="Mechanical Engineering"
-        elif list[3]==1:
-            branch="Civil Engineering"
-        elif list[3]==2:
-            branch="Electrical Engineering"
-        elif list[3]==3:
-            branch="Electronics and Communication Engineering"
-        elif list[3]==4:
-            branch="Computer Science and Engineering"
-        elif list[3]==5:
-            branch="Information Technology"
+    if list[7] == 0:
+        list[7] = "Mechanical Engineering"
+    elif list[7] == 1:
+        list[7] = "Civil Engineering"
+    elif list[7] == 2:
+        list[7] = "Electrical Engineering"
+    elif list[7] == 3:
+        list[7] = "Electronics and Communication Engineering"
+    elif list[7] == 4:
+        list[7] = "Computer Science and Engineering"
+    elif list[7] == 5:
+        list[7] = "Information Technology"
 
-        if list[4]==0:
-            year="1st"
-        elif list[4]==1:
-            year="2nd"
-        elif list[4]==2:
-            year="3rd"
-        elif list[4]==3:
-            year="4th"
+    labels = ["Registration No", "Roll No", "Name", "Mother's Name", "Father's Name",
+              "Gender", "Date of Birth", "Branch", "Address", "Mobile", "Image", "Marksheet"]
 
-        academic_year=list[5]
-        address=list[6]
-        mobile=list[7]
+    table = QTableWidget()
+    tableItem = QTableWidgetItem()
+    table.setWindowTitle("Student Registration Details")
+    table.setRowCount(10)
+    table.setColumnCount(2)
+    imageArea = QLabel("Passport Sized Image")
+    for x in range(10):
+        table.setItem(x, 0, QTableWidgetItem(labels[x]))
+        table.setItem(x, 1, QTableWidgetItem(str(list[x])))
+        imageArea.setPixmap(QtGui.QPixmap(list[10]).scaledToHeight(220, Qt.SmoothTransformation))
+    table.horizontalHeader().setStretchLastSection(True)
+    table.show()
 
-        #we make the table here. Table has eight rows and 2 columns.
-        #in PyQt tables are like grids. you have to place each QTableWidgetItem seprately corresponding to the grid system with x and y
-        # both starting at 0 index. Then we populate the table with values from the passed list as we got all of them above.
+    dialog = QDialog()
+    layout = QGridLayout(dialog)
+    dialog.setWindowTitle("Viewing 1 out of " + str(total) + " Registered Students")
+    dialog.resize(500, 350)
+    dialog.setMinimumSize(500, 350)
+    dialog.setMaximumSize(600, 350)
+    layout.addWidget(imageArea, 0, 3)
+    layout.addWidget(table, 0, 1, 2, 2)
+    dialog.setLayout(layout)
+    dialog.exec()
 
-        table=QTableWidget()
-        tableItem=QTableWidgetItem()
-        table.setWindowTitle("Student Details")
-        table.setRowCount(8)
-        table.setColumnCount(2)
 
-        table.setItem(0, 0, QTableWidgetItem("Roll"))
-        table.setItem(0, 1, QTableWidgetItem(str(roll)))
-        table.setItem(1, 0, QTableWidgetItem("Name"))
-        table.setItem(1, 1, QTableWidgetItem(str(name)))
-        table.setItem(2, 0, QTableWidgetItem("Gender"))
-        table.setItem(2, 1, QTableWidgetItem(str(gender)))
-        table.setItem(3, 0, QTableWidgetItem("Branch"))
-        table.setItem(3, 1, QTableWidgetItem(str(branch)))
-        table.setItem(4, 0, QTableWidgetItem("Year"))
-        table.setItem(4, 1, QTableWidgetItem(str(year)))
-        table.setItem(5, 0, QTableWidgetItem("Academic Year"))
-        table.setItem(5, 1, QTableWidgetItem(str(academic_year)))
-        table.setItem(6, 0, QTableWidgetItem("Address"))
-        table.setItem(6, 1, QTableWidgetItem(str(address)))
-        table.setItem(7, 0, QTableWidgetItem("Mobile"))
-        table.setItem(7, 1, QTableWidgetItem(str(mobile)))
-        table.horizontalHeader().setStretchLastSection(True)
-        table.show()
-        dialog=QDialog()
-        dialog.setWindowTitle("Student Details")
-        dialog.resize(500,300)
-        dialog.setLayout(QVBoxLayout())
-        dialog.layout().addWidget(table)
-        dialog.exec()
-
-#function to show the payments records holding the roll number given
+# function to show the payments records holding the roll number given
 def showPaymentFunction(list):
-    roll = -1
-    recipt_no = -1
-    fee = -1
-    semester = -1
-    recipt_date = ""
-
-    recipt_no = list[0]
-    roll = list[1]
-    fee = list[2]
-
-    #as I said earlier if semester value is 0 that means Odd semester and if it is 1 then student has paid both semester fees
-    #as we eliminated the possibility of adding Even semester payment record first.
-    if list[3] == 0:
-        semester = "Odd Semester"
-    elif list[3]==1:
-        semester = "Paid for both Odd and Even Semester"
-    recipt_date=list[4]
-
-
-    #we do the same as showing student details. we make a table with 5 rows and 2 columns.
-    #then we create QTableWidgetItem for each box of the grid system.
     table = QTableWidget()
     tableItem = QTableWidgetItem()
     table.setWindowTitle("Student Payment Details")
-    table.setRowCount(5)
+    table.setRowCount(4)
     table.setColumnCount(2)
 
-    table.setItem(0, 0, QTableWidgetItem("Receipt No"))
-    table.setItem(0, 1, QTableWidgetItem(str(recipt_no)))
-    table.setItem(1, 0, QTableWidgetItem("Roll"))
-    table.setItem(1, 1, QTableWidgetItem(str(roll)))
-    table.setItem(2, 0, QTableWidgetItem("Total Fee"))
-    table.setItem(2, 1, QTableWidgetItem(str(fee)))
-    table.setItem(3, 0, QTableWidgetItem("Semester"))
-    table.setItem(3, 1, QTableWidgetItem(str(semester)))
-    table.setItem(4, 0, QTableWidgetItem("Receipt Date"))
-    table.setItem(4, 1, QTableWidgetItem(str(recipt_date)))
+    labels = ["Receipt No", "Registration No", "Total Fee", "Receipt Date"]
+    for i in range(4):
+        table.setItem(i, 0, QTableWidgetItem(labels[i]))
+        table.setItem(i, 1, QTableWidgetItem(str(list[i])))
 
     table.horizontalHeader().setStretchLastSection(True)
     table.show()
     dialog = QDialog()
-    dialog.setWindowTitle("Student Payment Details Details")
+    dialog.setWindowTitle("Student Payment Details")
     dialog.resize(500, 300)
     dialog.setLayout(QVBoxLayout())
     dialog.layout().addWidget(table)
     dialog.exec()
 
-#this is class which inherits QDialog to create the entry form of adding student functionality.
-#it has two drops down as gender with options like Male and Female and another Branch holding 6 options like
-#ME,CE,EE,ECE,CSE,IT (abbreviated here)
-#it has three buttons. Reset,Add,Cancel.
-#Reset clear the text fields, Add calls the function addStudent() which in turn calls addStudent() of DBHelper class.
+
 class AddStudent(QDialog):
+    def uploadPDF(self):
+        try:
+            self.document, _ = QFileDialog.getOpenFileName(self, 'Upload Scanned 12th Marksheet', '~/', '*.pdf')
+            self.documentName.setText(self.document)
+        finally:
+            return
+
+    def uploadImage(self):
+        self.image, _ = QFileDialog.getOpenFileName(self, 'Upload Passport Sized Image', '~/', '*.jpg;*.jpeg;*.png')
+        self.imageArea.setPixmap(QtGui.QPixmap(self.image).scaledToHeight(
+            self.imageArea.height(), Qt.SmoothTransformation))
+        self.resize(600, 390)
+        self.show()
+
     def __init__(self):
         super().__init__()
+        self.grid = QGridLayout(self)
+        self.document = ''
+        self.image = ''
+        self.marks = ''
+        self.imageArea = QLabel("Upload Passport Sized Image")
+        self.imageArea.setPixmap(QtGui.QPixmap("logo.png"))
 
-        #general variables
-        self.gender=-1
-        self.branch=-1
-        self.year=-1
-        self.roll=-1
-        self.name=""
-        self.address=""
-        self.mobile=-1
-        self.academic_year=-1
-
-
-        self.btnCancel=QPushButton("Cancel",self)
-        self.btnReset=QPushButton("Reset",self)
-        self.btnAdd=QPushButton("Add",self)
-
+        self.btnCancel = QPushButton("Cancel", self)
+        self.btnReset = QPushButton("Reset", self)
+        self.btnAdd = QPushButton("Submit Registration Details", self)
         self.btnCancel.setFixedHeight(30)
         self.btnReset.setFixedHeight(30)
         self.btnAdd.setFixedHeight(30)
 
-        self.yearCombo=QComboBox(self)
-        self.yearCombo.addItem("1st")
-        self.yearCombo.addItem("2nd")
-        self.yearCombo.addItem("3rd")
-        self.yearCombo.addItem("4th")
-
-        self.genderCombo = QComboBox(self)
-        self.genderCombo.addItem("Male")
-        self.genderCombo.addItem("Female")
-
+        self.branchLabel = QLabel("Branch")
         self.branchCombo = QComboBox(self)
         self.branchCombo.addItem("Mechanical")
         self.branchCombo.addItem("Civil")
@@ -374,174 +252,228 @@ class AddStudent(QDialog):
         self.branchCombo.addItem("Computer Science")
         self.branchCombo.addItem("Information Technology")
 
+        self.nameLabel = QLabel("Full Name")
+        self.nameText = QLineEdit(self)
+        self.motherLabel = QLabel("Mother's Name")
+        self.motherText = QLineEdit(self)
+        self.fatherLabel = QLabel("Father's Name")
+        self.fatherText = QLineEdit(self)
 
-        self.rollLabel=QLabel("Roll No")
-        self.nameLabel=QLabel("Name")
+        self.documentName = QLabel("Photo max size 1mb, jpg, png only\nMarksheet 2mb, pdf only")
         self.addressLabel = QLabel("Address")
         self.mobLabel = QLabel("Mobile")
-        self.yearLabel = QLabel("Current Year")
         self.academicYearLabel = QLabel("Academic Year")
-        self.branchLabel = QLabel("Branch")
-        self.genderLabel=QLabel("Gender")
+        self.genderLabel = QLabel("Gender")
+        self.dobLabel = QLabel("Date of Birth")
+        self.marksLabel = QLabel("12th Marks in %")
+        self.mathsLabel = QLabel("Maths %")
+        self.englishLabel = QLabel("English %")
+        self.physicsLabel = QLabel("Physics %")
 
-        self.rollText=QLineEdit(self)
-        self.nameText=QLineEdit(self)
+        self.genderCombo = QComboBox(self)
+        self.genderCombo.addItem("Male")
+        self.genderCombo.addItem("Female")
+
+        self.btnDocument = QPushButton("Upload Scanned 12th Marksheet", self)
+        self.btnImage = QPushButton("Upload Passport-sized Photo", self)
+        self.dobSelector = QDateEdit(calendarPopup=True)
+
+        self.btnDocument.setFixedHeight(30)
+        self.btnImage.setFixedHeight(30)
+        self.dobSelector.setDateRange(QDate(1970, 1, 1), QDate(2004, 1, 31))
+        self.dobSelector.setDate(QDate(2002, 1, 1))
+
+        self.btnDocument.clicked.connect(self.uploadPDF)
+        self.btnImage.clicked.connect(self.uploadImage)
+
         self.addressText = QLineEdit(self)
         self.mobText = QLineEdit(self)
-        self.academicYearText = QLineEdit(self)
+        self.marks = QLineEdit(self)
+        self.maths = QLineEdit(self)
+        self.english = QLineEdit(self)
+        self.physics = QLineEdit(self)
 
-        self.grid=QGridLayout(self)
-        self.grid.addWidget(self.rollLabel,1,1)
-        self.grid.addWidget(self.nameLabel,2,1)
-        self.grid.addWidget(self.genderLabel, 3, 1)
-        self.grid.addWidget(self.addressLabel, 4, 1)
-        self.grid.addWidget(self.mobLabel, 5, 1)
-        self.grid.addWidget(self.branchLabel, 6, 1)
-        self.grid.addWidget(self.yearLabel,7,1)
-        self.grid.addWidget(self.academicYearLabel, 8, 1)
+        self.grid.addWidget(self.imageArea, 1, 3, 5, 1)
+        self.grid.addWidget(self.btnImage, 6, 3)
+        self.grid.addWidget(self.btnDocument, 7, 3)
+        self.grid.addWidget(self.documentName, 8, 3, 2, 1)
 
+        self.grid.addWidget(self.nameLabel, 1, 1)
+        self.grid.addWidget(self.motherLabel, 2, 1)
+        self.grid.addWidget(self.fatherLabel, 3, 1)
+        self.grid.addWidget(self.genderLabel, 4, 1)
+        self.grid.addWidget(self.dobLabel, 5, 1)
+        self.grid.addWidget(self.addressLabel, 6, 1)
+        self.grid.addWidget(self.mobLabel, 7, 1)
+        self.grid.addWidget(self.branchLabel, 8, 1)
 
+        self.grid.addWidget(self.nameText, 1, 2)
+        self.grid.addWidget(self.motherText, 2, 2)
+        self.grid.addWidget(self.fatherText, 3, 2)
+        self.grid.addWidget(self.genderCombo, 4, 2)
+        self.grid.addWidget(self.dobSelector, 5, 2)
+        self.grid.addWidget(self.addressText, 6, 2)
+        self.grid.addWidget(self.mobText, 7, 2)
+        self.grid.addWidget(self.branchCombo, 8, 2)
+        self.marksArea = QGridLayout(self)
+        self.marksArea.addWidget(self.marksLabel, 1, 1)
+        self.marksArea.addWidget(self.mathsLabel, 1, 3)
+        self.marksArea.addWidget(self.physicsLabel, 1, 5)
+        self.marksArea.addWidget(self.englishLabel, 1, 7)
+        self.marksArea.addWidget(self.marks, 1, 2)
+        self.marksArea.addWidget(self.maths, 1, 4)
+        self.marksArea.addWidget(self.physics, 1, 6)
+        self.marksArea.addWidget(self.english, 1, 8)
 
+        self.grid.addLayout(self.marksArea, 9, 1, 1, 2)
 
+        # adding three buttons
+        self.grid.addWidget(self.btnReset, 10, 1)
+        self.grid.addWidget(self.btnCancel, 10, 3)
+        self.grid.addWidget(self.btnAdd, 10, 2)
 
-        self.grid.addWidget(self.rollText,1,2)
-        self.grid.addWidget(self.nameText,2,2)
-        self.grid.addWidget(self.genderCombo, 3, 2)
-        self.grid.addWidget(self.addressText, 4, 2)
-        self.grid.addWidget(self.mobText, 5, 2)
-        self.grid.addWidget(self.branchCombo, 6, 2)
-        self.grid.addWidget(self.yearCombo,7,2)
-        self.grid.addWidget(self.academicYearText, 8, 2)
-
-
-
-        #adding three buttons
-        self.grid.addWidget(self.btnReset,9,1)
-        self.grid.addWidget(self.btnCancel,9,3)
-        self.grid.addWidget(self.btnAdd,9,2)
-
-        #button connectors
+        # button connectors
         self.btnAdd.clicked.connect(self.addStudent)
-        self.btnCancel.clicked.connect(QApplication.instance().quit)
+        self.btnCancel.clicked.connect(self.close)
         self.btnReset.clicked.connect(self.reset)
 
         self.setLayout(self.grid)
-        self.setWindowTitle("Add Student Details")
-        self.resize(500,300)
+        self.setWindowTitle("Register Student For UG Course")
+        self.resize(600, 390)
+        self.setMaximumWidth(600)
+        self.setMaximumHeight(390)
         self.show()
-        sys.exit(self.exec())
+        x = self.documentName.width()
+        self.documentName.setMaximumWidth(x)
+        self.documentName.setWordWrap(True)
+        self.exec()
 
     def reset(self):
-        self.rollText.setText("")
-        self.academicYearText.setText("")
         self.nameText.setText("")
         self.addressText.setText("")
         self.mobText.setText("")
+        self.marks.setText("")
+        self.maths.setText("")
+        self.english.setText("")
+        self.physics.setText("")
+        self.dobSelector.setDate(QDate(2002, 1, 1))
+        self.documentName.setText("")
+        self.imageArea.setPixmap(QtGui.QPixmap("logo.png"))
 
     def addStudent(self):
-        self.gender=self.genderCombo.currentIndex()
-        self.year=self.yearCombo.currentIndex()
-        self.branch=self.branchCombo.currentIndex()
-        self.roll=int(self.rollText.text())
-        self.name=self.nameText.text()
-        self.academic_year=int(self.academicYearText.text())
-        self.address=self.addressText.text()
-        self.mobile=int(self.mobText.text())
+        self.marks_set = [self.marks.text(), self.maths.text(), self.english.text(), self.physics.text()]
+        if self.check_eligibility():
+            self.dbhelper = DBHelper()
+            self.dbhelper.addStudent(self.nameText.text(), self.motherText.text(), self.fatherText.text(),
+                                      self.genderCombo.currentIndex(), self.branchCombo.currentIndex(),
+                                      self.dobSelector.date().toString('dd-MM-yyyy'), self.marks_set,
+                                      self.addressText.text(), int(self.mobText.text()), self.image, self.document)
+        else:
+            self.branchCombo.focusWidget()
 
-        self.dbhelper=DBHelper()
-        self.dbhelper.addStudent(self.roll,self.name,self.gender,self.branch,self.year,self.academic_year,self.address,self.mobile)
+# function to check eligibility for admission in any branch:
+    def check_eligibility(self):
+        error = ''
+        if self.nameText.text() == '':
+            error += 'Enter student\'s full name.\n'
+        if self.mobText.text() == '':
+            error += 'Please enter a valid mobile number without STD code.\n'
+        if self.addressText.text() == '':
+            error += 'Enter student\'s permanent address.\n'
+        if self.documentName.text() == '':
+            error += 'Upload a scanned PDF of 12th marksheet.\n'
+        if self.marks.text() == '':
+            error += 'Please enter % marks gained in 12th standard.'
+        if error != '':
+            QMessageBox.warning(QMessageBox(), 'Incomplete Form', error)
+            return False
 
-#it is the dialog for adding payment functionality. It has only one drop down for semester with options
-#like Odd semester and Even semester.
-#other fields are roll,fee.
+        valid = True
+        branch_id = self.branchCombo.currentIndex()
+        labels = ["Mechanical", "Civil", "Electrical", "Electronics and Communication", "Computer Science", "Information Technology"]
+        marks = ["12th Standard", "Maths", "English", "Physics"]
+        required = [[75, 65, 50, 65], [75, 65, 50, 65], [75, 70, 50, 65], [75, 70, 50, 65], [75, 65, 50, 50], [75, 65, 50, 50]]
+
+        for i in range(4):
+            if self.marks_set[i] == '':
+                QMessageBox.warning(QMessageBox(), 'Incomplete Form',
+                                    'A minimum of ' + str(required[branch_id][i]) + '% is required in ' + marks[i] +
+                                    ' for admission in ' + labels[branch_id])
+            if int(self.marks_set[i]) < required[branch_id][i]:
+                QMessageBox.warning(QMessageBox(), 'Failed!',
+                                    'Student is not eligible for admission in ' + labels[branch_id] + '\n' +
+                                    'The minimum marks required in ' + marks[i] + ' is ' +
+                                    str(required[branch_id][i]) + '%')
+                return False
+        QMessageBox.information(QMessageBox(), 'Successful!', 'Student is eligible for ' + labels[branch_id])
+        return True
+
+
 class AddPayment(QDialog):
     def __init__(self):
         super().__init__()
 
-        #general variables
-        self.reciept_no=-1
-        self.roll=-1
-        self.fee=-1
-        self.semester=-1
-        self.date=-1
+        # general variables
+        self.receipt_no = -1
 
-
-
-        self.btnCancel=QPushButton("Cancel",self)
-        self.btnReset=QPushButton("Reset",self)
-        self.btnAdd=QPushButton("Add",self)
+        self.btnCancel = QPushButton("Cancel", self)
+        self.btnReset = QPushButton("Reset", self)
+        self.btnAdd = QPushButton("Submit Payment Details", self)
 
         self.btnCancel.setFixedHeight(30)
         self.btnReset.setFixedHeight(30)
         self.btnAdd.setFixedHeight(30)
 
-        self.semesterCombo = QComboBox(self)
-        self.semesterCombo.addItem("Odd")
-        self.semesterCombo.addItem("Even")
+        self.regLabel = QLabel("Registration No")
+        self.feeLabel = QLabel("Total Fee")
 
-        self.rollLabel=QLabel("Roll No")
-        self.feeLabel=QLabel("Total Fee")
-        self.semesterLabel = QLabel("Semester")
+        self.regText = QLineEdit(self)
+        self.feeLabelText = QLineEdit(self)
 
-        self.rollText=QLineEdit(self)
-        self.feeLabelText=QLineEdit(self)
+        self.grid = QGridLayout(self)
+        self.grid.addWidget(self.regLabel, 1, 1)
+        self.grid.addWidget(self.feeLabel, 2, 1)
 
+        self.grid.addWidget(self.regText, 1, 2)
+        self.grid.addWidget(self.feeLabelText, 2, 2)
 
-        self.grid=QGridLayout(self)
-        self.grid.addWidget(self.rollLabel,1,1)
-        self.grid.addWidget(self.feeLabel,2,1)
-        self.grid.addWidget(self.semesterLabel, 3, 1)
+        # adding three buttons
+        self.grid.addWidget(self.btnReset, 4, 1)
+        self.grid.addWidget(self.btnCancel, 4, 3)
+        self.grid.addWidget(self.btnAdd, 4, 2)
 
-
-        self.grid.addWidget(self.rollText,1,2)
-        self.grid.addWidget(self.feeLabelText,2,2)
-        self.grid.addWidget(self.semesterCombo, 3, 2)
-
-        #adding three buttons
-        self.grid.addWidget(self.btnReset,4,1)
-        self.grid.addWidget(self.btnCancel,4,3)
-        self.grid.addWidget(self.btnAdd,4,2)
-
-        #button connectors
+        # button connectors
         self.btnAdd.clicked.connect(self.addPayment)
-        self.btnCancel.clicked.connect(QApplication.instance().quit)
+        self.btnCancel.clicked.connect(self.close)
         self.btnReset.clicked.connect(self.reset)
 
         self.setLayout(self.grid)
         self.setWindowTitle("Add Payment Details")
-        self.resize(400,200)
+        self.resize(400, 200)
         self.show()
-        sys.exit(self.exec())
+        self.exec()
+
     def reset(self):
-        self.rollText.setText("")
+        self.regText.setText("")
         self.feeLabelText.setText("")
 
     def addPayment(self):
-        self.semester=self.semesterCombo.currentIndex()
-        self.roll=int(self.rollText.text())
-        self.fee=int(self.feeLabelText.text())
+        if self.regText.text() == "":
+            QMessageBox.warning(QMessageBox(), 'Missing Registration No', "Please enter Registration No to search.")
+            return False
+        if self.feeLabelText.text() == '':
+            QMessageBox.warning(QMessageBox(), 'Missing Amount', "Please enter the amount paid!")
+            return False
 
-        self.dbhelper=DBHelper()
-        self.dbhelper.addPayment(self.roll,self.fee,self.semester)
+        self.dbhelper = DBHelper()
+        self.dbhelper.addPayment(int(self.regText.text()), int(self.feeLabelText.text()))
 
 
-
-#this is the main window which holds everything. It holds for buttons.
-#Enter Student Details
-#Enter Payment Details
-#Show Student Details
-#Show Payment Details
-#it has two functions named enterstudent() and enterpayment() which show the dialogs created above respectively
-#another two functions showStudent() and showStudentPaymentDialog() shows dialog for the user to enter the roll number
-#he or she wants to search records for.
-#showStudent() and showPayment() which are the actual functions which call the corresponding ssearching functions of the
-#DBHelper class. These two functions are connected to the 'search' button of the dialog where user enters the roll number.
 class Window(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.rollToBeSearched=0
         self.vbox = QVBoxLayout()
-        self.text = QLabel("Enter the roll no of the student")
+        self.text = QLabel("Enter the Reg No of the student")
         self.editField = QLineEdit()
         self.btnSearch = QPushButton("Search", self)
         self.btnSearch.clicked.connect(self.showStudent)
@@ -552,9 +484,8 @@ class Window(QMainWindow):
         self.dialog.setWindowTitle("Enter Roll No")
         self.dialog.setLayout(self.vbox)
 
-        self.rollForPayment = 0
         self.vboxPayment = QVBoxLayout()
-        self.textPayment = QLabel("Enter the roll no of the student")
+        self.textPayment = QLabel("Enter the Reg No of the student")
         self.editFieldPayment = QLineEdit()
         self.btnSearchPayment = QPushButton("Search", self)
         self.btnSearchPayment.clicked.connect(self.showStudentPayment)
@@ -562,79 +493,77 @@ class Window(QMainWindow):
         self.vboxPayment.addWidget(self.editFieldPayment)
         self.vboxPayment.addWidget(self.btnSearchPayment)
         self.dialogPayment = QDialog()
-        self.dialogPayment.setWindowTitle("Enter Roll No")
+        self.dialogPayment.setWindowTitle("Enter Reg No")
         self.dialogPayment.setLayout(self.vboxPayment)
 
-        self.btnEnterStudent=QPushButton("Enter Student Details",self)
-        self.btnEnterPayment=QPushButton("Enter Payment Details",self)
-        self.btnShowStudentDetails=QPushButton("Show Student Details",self)
-        self.btnShowPaymentDetails=QPushButton("Show Payment Details",self)
+        self.btnEnterStudent = QPushButton("Register New Student", self)
+        self.btnEnterPayment = QPushButton("Confirm Student's Payment", self)
+        self.btnShowStudentDetails = QPushButton("Check Registration Details", self)
+        self.btnShowPaymentDetails = QPushButton("Check Payment Receipts", self)
 
-        #picture
-        self.picLabel=QLabel(self)
-        self.picLabel.resize(150,150)
-        self.picLabel.move(120,20)
+        # picture
+        self.picLabel = QLabel(self)
+        self.picLabel.resize(190, 200)
+        self.picLabel.move(150, 10)
         self.picLabel.setScaledContents(True)
-        self.picLabel.setPixmap(QtGui.QPixmap("user.png"))
+        self.picLabel.setPixmap(QtGui.QPixmap("logo.png"))
 
-        self.btnEnterStudent.move(15,170)
-        self.btnEnterStudent.resize(180,40)
-        self.btnEnterStudentFont=self.btnEnterStudent.font()
+        self.btnEnterStudent.move(15, 200)
+        self.btnEnterStudent.resize(220, 40)
+        self.btnEnterStudentFont = self.btnEnterStudent.font()
         self.btnEnterStudentFont.setPointSize(13)
         self.btnEnterStudent.setFont(self.btnEnterStudentFont)
-        self.btnEnterStudent.clicked.connect(self.enterstudent)
+        self.btnEnterStudent.clicked.connect(AddStudent)
 
-        self.btnEnterPayment.move(205,170)
-        self.btnEnterPayment.resize(180, 40)
+        self.btnEnterPayment.move(245, 200)
+        self.btnEnterPayment.resize(220, 40)
         self.btnEnterPaymentFont = self.btnEnterStudent.font()
         self.btnEnterPaymentFont.setPointSize(13)
         self.btnEnterPayment.setFont(self.btnEnterPaymentFont)
-        self.btnEnterPayment.clicked.connect(self.enterpayment)
+        self.btnEnterPayment.clicked.connect(AddPayment)
 
-        self.btnShowStudentDetails.move(15, 220)
-        self.btnShowStudentDetails.resize(180, 40)
+        self.btnShowStudentDetails.move(15, 250)
+        self.btnShowStudentDetails.resize(220, 40)
         self.btnShowStudentDetailsFont = self.btnEnterStudent.font()
         self.btnShowStudentDetailsFont.setPointSize(13)
         self.btnShowStudentDetails.setFont(self.btnShowStudentDetailsFont)
-        self.btnShowStudentDetails.clicked.connect(self.showStudentDialog)
+        self.btnShowStudentDetails.clicked.connect(self.dialog.exec)
 
-        self.btnShowPaymentDetails.move(205, 220)
-        self.btnShowPaymentDetails.resize(180, 40)
+        self.btnShowPaymentDetails.move(245, 250)
+        self.btnShowPaymentDetails.resize(220, 40)
         self.btnShowPaymentDetailsFont = self.btnEnterStudent.font()
         self.btnShowPaymentDetailsFont.setPointSize(13)
         self.btnShowPaymentDetails.setFont(self.btnShowPaymentDetailsFont)
-        self.btnShowPaymentDetails.clicked.connect(self.showStudentPaymentDialog)
+        self.btnShowPaymentDetails.clicked.connect(self.dialogPayment.exec)
 
-        self.resize(400,280)
-        self.setWindowTitle("Student Database Management System")
+        self.resize(480, 300)
+        self.picLabel.setStyleSheet("background-color: #00000000")
+        self.btnEnterPayment.setStyleSheet("background-color: #ffffff")
+        self.btnEnterStudent.setStyleSheet("background-color: #ffffff")
+        self.btnShowPaymentDetails.setStyleSheet("background-color: #ffffff")
+        self.btnShowStudentDetails.setStyleSheet("background-color: #ffffff")
+        self.setStyleSheet("background-color: #bbbbbb")
+        self.setWindowTitle("Student Admission System")
 
-    def enterstudent(self):
-        enterStudent=AddStudent()
-    def enterpayment(self):
-        enterpayment=AddPayment()
-    def showStudentDialog(self):
-        self.dialog.exec()
-    def showStudentPaymentDialog(self):
-        self.dialogPayment.exec()
     def showStudent(self):
-        if self.editField.text() is "":
-            QMessageBox.warning(QMessageBox(), 'Error',
-                                'You must give the roll number to show the results for.')
+        if self.editField.text() == "":
+            QMessageBox.warning(QMessageBox(), 'Error', 'You must give the Reg number to show the results for.')
             return None
         showstudent = DBHelper()
         showstudent.searchStudent(int(self.editField.text()))
+
     def showStudentPayment(self):
-        if self.editFieldPayment.text() is "":
-            QMessageBox.warning(QMessageBox(), 'Error',
-                                'You must give the roll number to show the results for.')
+        if self.editFieldPayment.text() == "":
+            QMessageBox.warning(QMessageBox(), 'Error', 'You must give the Reg number to show the results for.')
             return None
         showstudent = DBHelper()
         showstudent.searchPayment(int(self.editFieldPayment.text()))
 
-#main function which shows the login dialog first. if user puts the correct username and password it then goes to the main window
-#where there are four buttons as mentioned above.
+
 if __name__ == '__main__':
     app = QApplication(sys.argv)
+    app.setWindowIcon(QtGui.QIcon("icon.jpg"))
+
     login = Login()
 
     if login.exec_() == QDialog.Accepted:
