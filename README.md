@@ -7,11 +7,6 @@ Refer to the screenshots folder to have a general view of the working of the sof
 
 RUN `python3 main.py`
 
-
-![Alt text](/screenshots/Screenshot_1.png?raw=true "Admin Panel (old)")
-![Alt text](/screenshots/Screenshot_2.png?raw=true "Add Student Details (old)")
-![Alt text](/screenshots/Screenshot_3.png?raw=true "Show Student Details (old)")
-
 ![Alt text](/screenshots/Screenshot_4.png?raw=true "Login Dialogue")
 ![Alt text](/screenshots/Screenshot_5.png?raw=true "Admin Panel")
 ![Alt text](/screenshots/Screenshot_6.png?raw=true "Student Search")
